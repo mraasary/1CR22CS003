@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>React URL Shortener</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .url-field {
+            margin-bottom: 20px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+        .url-field h3 {
+            margin-top: 0;
+            color: #555;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0 15px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 5px rgba(0,123,255,0.3);
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .remove-btn {
+            background: #dc3545;
+        }
+        .remove-btn:hover {
+            background: #c82333;
+        }
+        .success-btn {
+            background: #28a745;
+        }
+        .success-btn:hover {
+            background: #218838;
+        }
+        .error {
+            color: #dc3545;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+        .loading {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+        .error-message {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+        .copy-btn {
+            background: #17a2b8;
+            font-size: 12px;
+            padding: 5px 10px;
+        }
+        .copy-btn:hover {
+            background: #138496;
+        }
+        .button-container {
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Utility functions
+        const isValidUrl = (url) => {
+            try {
+                let urlToTest = url;
+                if (!url.match(/^https?:\/\//)) {
+                    urlToTest = 'https://' + url;
+                }
+                new URL(urlToTest);
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
+        const isValidShortcode = (shortcode) => {
+            return /^[a-zA-Z0-9]{3,10}$/.test(shortcode);
+        };
+
+        const isValidValidity = (validity) => {
+            const num = parseInt(validity);
+            return !isNaN(num) && num > 0 && num <= 525600;
+        };
+
+        const generateShortcode = () => {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let result = '';
+            for (let i = 0; i < 6; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        };
+
+        const copyToClipboard = async (text) => {
+            try {
+                if (navigator.clipboard) {
+                    await navigator.clipboard.writeText(text);
+                    alert('URL copied to clipboard!');
+                } else {
+                    // Fallback for older browsers
+                    const textArea = document.createElement('textarea');
+                    textArea.value = text;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    alert('URL copied to clipboard!');
+                }
+            } catch (err) {
+                alert('Failed to copy URL. Please copy manually.');
+            }
+        };
+
+        // URL Field Component
+        const UrlField = ({ 
+            url, 
+            index, 
+            onUpdate, 
+            onRemove, 
+            canRemove, 
+            isProcessing 
+        }) => {
+            const [errors, setErrors] = useState({});
+
+            const validateField = (field, value) => {
+                const newErrors = { ...errors };
+                
+                if (field === 'longUrl' && value) {
+                    if (!isValidUrl(value)) {
+                        newErrors.longUrl = 'Please enter a valid URL (e.g., https://example.com)';
+                    } else {
+                        delete newErrors.longUrl;
+                    }
+                }
+                
+                if (field === 'shortcode' && value) {
+                    if (!isValidShortcode(value)) {
+                        newErrors.shortcode = 'Shortcode must be 3-10 alphanumeric characters';
+                    } else {
+                        delete newErrors.shortcode;
+                    }
+                }
+                
+                if (field === 'validity' && value) {
+                    if (!isValidValidity(value)) {
+                        newErrors.validity = 'Please enter a positive number (1-525600 minutes)';
+                    } else {
+                        delete newErrors.validity;
+                    }
+                }
+                
+                setErrors(newErrors);
+                return Object.keys(newErrors).length === 0;
+            };
+
+            const handleChange = (field, value) => {
+                onUpdate(url.id, field, value);
+                validateField(field, value);
+            };
+
+            return (
+                <div className="url-field">
+                    <h3>URL #{index + 1}</h3>
+                    
+                    {canRemove && (
+                        <button 
+                            className="remove-btn" 
+                            onClick={() => onRemove(url.id)}
+                            disabled={isProcessing}
+                        >
+                            Remove
+                        </button>
+                    )}
+                    
+                    <div>
+                        <label>Long URL *</label>
+                        <input 
+                            type="url" 
+                            value={url.longUrl} 
+                            onChange={(e) => handleChange('longUrl', e.target.value)}
+                            onBlur={(e) => handleChange('longUrl', e.target.value)}
+                            placeholder="https://example.com"
+                            disabled={isProcessing}
+                        />
+                        {errors.longUrl && <div className="error">{errors.longUrl}</div>}
+                    </div>
+                    
+                    <div>
+                        <label>Validity Period (minutes) - Optional</label>
+                        <input 
+                            type="number" 
+                            min="1" 
+                            max="525600"
+                            value={url.validity} 
+                            onChange={(e) => handleChange('validity', e.target.value)}
+                            onBlur={(e) => handleChange('validity', e.target.value)}
+                            placeholder="Default: 24 hours (1440 minutes)"
+                            disabled={isProcessing}
+                        />
+                        {errors.validity && <div className="error">{errors.validity}</div>}
+                    </div>
+                    
+                    <div>
+                        <label>Preferred Shortcode - Optional</label>
+                        <input 
+                            type="text" 
+                            value={url.shortcode} 
+                            onChange={(e) => handleChange('shortcode', e.target.value)}
+                            onBlur={(e) => handleChange('shortcode', e.target.value)}
+                            placeholder="3-10 alphanumeric characters"
+                            maxLength="10"
+                            disabled={isProcessing}
+                        />
+                        {errors.shortcode && <div className="error">{errors.shortcode}</div>}
+                    </div>
+                    
+                    {url.isLoading && (
+                        <div className="loading">
+                            Processing URL...
+                        </div>
+                    )}
+                    
+                    {url.errors?.general && (
+                        <div className="error-message">
+                            {url.errors.general}
+                        </div>
+                    )}
+                    
+                    {url.shortenedUrl && (
+                        <div className="success">
+                            <p><strong>Shortened URL:</strong> <a href={url.shortenedUrl} target="_blank" rel="noopener noreferrer">{url.shortenedUrl}</a></p>
+                            <p><strong>Original URL:</strong> {url.longUrl}</p>
+                            <p><strong>Expiry Date:</strong> {new Date(url.expiryDate).toLocaleString()}</p>
+                            <button 
+                                className="copy-btn" 
+                                onClick={() => copyToClipboard(url.shortenedUrl)}
+                            >
+                                Copy URL
+                            </button>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Main URL Shortener Component
+        const URLShortener = () => {
+            const [urls, setUrls] = useState([]);
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [error, setError] = useState('');
+
+            useEffect(() => {
+                // Initialize with one URL field
+                addUrlField();
+            }, []);
+
+            const createUrlField = () => ({
+                id: Date.now() + Math.random(),
+                longUrl: '',
+                validity: '',
+                shortcode: '',
+                errors: {},
+                shortenedUrl: null,
+                expiryDate: null,
+                isLoading: false
+            });
+
+            const addUrlField = () => {
+                if (urls.length >= 5) {
+                    alert('Maximum 5 URLs allowed');
+                    return;
+                }
+                setUrls(prev => [...prev, createUrlField()]);
+            };
+
+            const removeUrlField = (id) => {
+                if (urls.length <= 1) {
+                    alert('At least one URL field is required');
+                    return;
+                }
+                setUrls(prev => prev.filter(url => url.id !== id));
+            };
+
+            const updateUrlField = (id, field, value) => {
+                setUrls(prev => prev.map(url => 
+                    url.id === id 
+                        ? { ...url, [field]: value, errors: { ...url.errors, [field]: '' } }
+                        : url
+                ));
+            };
+
+            const validateAllUrls = () => {
+                let hasError = false;
+                const updatedUrls = urls.map(url => {
+                    const errors = {};
+                    
+                    if (!url.longUrl.trim()) {
+                        errors.longUrl = 'URL is required';
+                        hasError = true;
+                    } else if (!isValidUrl(url.longUrl)) {
+                        errors.longUrl = 'Please enter a valid URL';
+                        hasError = true;
+                    }
+                    
+                    if (url.shortcode && !isValidShortcode(url.shortcode)) {
+                        errors.shortcode = 'Invalid shortcode format';
+                        hasError = true;
+                    }
+                    
+                    if (url.validity && !isValidValidity(url.validity)) {
+                        errors.validity = 'Invalid validity period';
+                        hasError = true;
+                    }
+                    
+                    return { ...url, errors };
+                });
+                
+                setUrls(updatedUrls);
+                return !hasError;
+            };
+
+            const shortenUrls = async () => {
+                setError('');
+                
+                if (!validateAllUrls()) {
+                    return;
+                }
+
+                setIsProcessing(true);
+                
+                // Set loading state for all URLs
+                setUrls(prev => prev.map(url => ({ ...url, isLoading: true, errors: {} })));
+
+                try {
+                    // Process each URL
+                    for (let i = 0; i < urls.length; i++) {
+                        const url = urls[i];
+                        
+                        try {
+                            // Simulate API delay
+                            await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
+                            
+                            // Simulate occasional failures
+                            if (Math.random() < 0.1) {
+                                throw new Error('API temporarily unavailable');
+                            }
+                            
+                            const shortcode = url.shortcode || generateShortcode();
+                            const validityMinutes = url.validity ? parseInt(url.validity) : 1440; // 24 hours default
+                            const expiry = new Date(Date.now() + validityMinutes * 60 * 1000).toISOString();
+                            
+                            setUrls(prev => prev.map((u, index) => 
+                                index === i 
+                                    ? { 
+                                        ...u, 
+                                        shortenedUrl: `https://short.url/${shortcode}`,
+                                        expiryDate: expiry,
+                                        isLoading: false 
+                                    }
+                                    : u
+                            ));
+                        } catch (err) {
+                            setUrls(prev => prev.map((u, index) => 
+                                index === i 
+                                    ? { 
+                                        ...u, 
+                                        errors: { general: 'Failed to shorten this URL. Please try again.' },
+                                        isLoading: false 
+                                    }
+                                    : u
+                            ));
+                        }
+                    }
+                } catch (err) {
+                    setError('Failed to shorten URLs. Please try again.');
+                } finally {
+                    setIsProcessing(false);
+                }
+            };
+
+            return (
+                <div className="container">
+                    <h1>React URL Shortener</h1>
+                    
+                    {urls.map((url, index) => (
+                        <UrlField
+                            key={url.id}
+                            url={url}
+                            index={index}
+                            onUpdate={updateUrlField}
+                            onRemove={removeUrlField}
+                            canRemove={urls.length > 1}
+                            isProcessing={isProcessing}
+                        />
+                    ))}
+                    
+                    <div className="button-container">
+                        <button 
+                            id="addUrlBtn" 
+                            onClick={addUrlField}
+                            disabled={isProcessing || urls.length >= 5}
+                        >
+                            Add Another URL
+                        </button>
+                        <button 
+                            id="shortenBtn" 
+                            onClick={shortenUrls}
+                            disabled={isProcessing}
+                            className="success-btn"
+                        >
+                            {isProcessing ? 'Processing...' : 'Shorten URLs'}
+                        </button>
+                    </div>
+                    
+                    {error && (
+                        <div className="error-message">
+                            {error}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<URLShortener />);
+    </script>
+</body>
+</html>
